@@ -51,7 +51,7 @@ case "$OS_NAME,$OS_RELEASE" in
         CFGMGR=yum-config-manager
         BDEP=yum-builddep
         ;;
-    XCP-ng,8.99.*|XCP-ng,9.*|AlmaLinux,10|AlmaLinux,10.*)
+    XCP-ng,8.99.*|XCP-ng,9.*|AlmaLinux,10.*|AlmaLinux\ Kitten,10*)
         DNF=dnf
         CFGMGR="dnf config-manager"
         BDEP="dnf builddep"
@@ -108,7 +108,7 @@ if [ -n "$BUILD_LOCAL" ]; then
 
         case "$OS_NAME,$OS_RELEASE" in
             XCP-ng,8.2.*|XCP-ng,8.3.*) ;; # sources always available via git-lfs
-            XCP-ng,8.99.*|XCP-ng,9.*|AlmaLinux,10|AlmaLinux,10.*) if [ -r sources ]; then alma_get_sources -i sources; fi ;;
+            XCP-ng,8.99.*|XCP-ng,9.*|AlmaLinux,10.*|AlmaLinux\ Kitten,10*) if [ -r sources ]; then alma_get_sources -i sources; fi ;;
             *) echo >&2 "ERROR: unknown release, don't know how to find sources"; exit 1 ;;
         esac
 
