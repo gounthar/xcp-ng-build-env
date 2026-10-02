@@ -1,0 +1,106 @@
+# riscv64 variant of Dockerfile-9.x: AlmaLinux 10.x has no riscv64, Kitten has.
+# No releasever pin (Kitten is a rolling 10), no EPEL (no riscv64 tree), and no
+# XCP-ng 8.99 repo (no riscv64 tree either; copied but disabled).
+FROM    ghcr.io/almalinux/10-kitten-minimal:10-kitten
+
+ARG     VARIANT=build
+
+
+# Add our repositories
+# temporary bootstrap repository
+# FIXME: if [ ${VARIANT} = build ]
+COPY    files/xcp-ng-8.99.repo /etc/yum.repos.d/xcp-ng.repo
+
+# AlmaLinux Kitten 10 devel
+COPY    files/Kitten10-devel.repo /etc/yum.repos.d/
+
+ARG     RPMARCH=unspecified
+RUN     grep -l "@RPMARCH@" /etc/yum.repos.d/*.repo | xargs sed -i -e "s/@RPMARCH@/${RPMARCH}/g"
+
+# Install GPG key
+RUN     curl -sSf https://xcp-ng.org/RPM-GPG-KEY-xcpng -o /etc/pki/rpm-gpg/RPM-GPG-KEY-xcpng
+
+# dnf config-manager not available yet?
+RUN     sed -i -e 's/^enabled=1$/enabled=0/' /etc/yum.repos.d/xcp-ng.repo
+
+RUN     microdnf -y install dnf
+RUN     dnf --setopt=install_weak_deps=False swap -y coreutils-single @core
+RUN     dnf remove -y \
+        crypto-policies-scripts \
+        iwlwifi-dvm-firmware \
+        iwlwifi-mvm-firmware \
+        kexec-tools \
+        xfsprogs
+
+# things that we don't want installed in the build-env, because they
+# are not in the default install, and that prevents detection of them
+# being dependencies of other packages (should not be necessary with
+# dnf-bridge)
+RUN     dnf remove -y \
+        amd-gpu-firmware \
+        hwdata \
+        initscripts-rename-device \
+        intel-gpu-firmware \
+        iproute \
+        linux-firmware \
+        linux-firmware-whence \
+        pciutils-libs
+
+# Update
+RUN     dnf update -y
+
+# Common build requirements
+RUN     dnf install -y \
+            gcc \
+            gcc-c++ \
+            git \
+            git-lfs \
+            make \
+            rpm-build \
+            redhat-rpm-config \
+            python3-rpm \
+            sudo \
+            dnf-plugins-core
+
+
+# EPEL-only on 9.x (epel-rpm-macros, almalinux-git-utils, ccache): skipped
+
+# Niceties
+RUN     dnf install -y \
+            bash-completion \
+            vim \
+            wget \
+            which
+
+# clean package cache to avoid download errors
+RUN     yum clean all
+
+# FIXME: isn't it already pulled as almalinux-release when available?
+RUN     if [ ${VARIANT} != bootstrap ]; then \
+            dnf install -y \
+            xcp-ng-release; \
+        fi
+
+# enable repositories commonly required to build
+RUN     dnf config-manager --enable crb
+
+# workaround sudo not working (e.g. in podman 4.9.3 in Ubuntu 24.04)
+RUN     chmod 0400 /etc/shadow
+
+# create the builder user
+RUN     groupadd -g 1000 builder \
+        && useradd -u 1000 -g 1000 builder \
+        && echo "builder:builder" | chpasswd \
+        && echo "builder ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+RUN     mkdir -p /usr/local/bin
+RUN     GOSU_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+        && curl -fsSL "https://github.com/tianon/gosu/releases/download/1.17/gosu-${GOSU_ARCH}" -o /usr/local/bin/gosu \
+        && chmod +x /usr/local/bin/gosu
+COPY    files/init-container.sh /usr/local/bin/init-container.sh
+COPY    files/entrypoint.sh /usr/local/bin/entrypoint.sh
+# FIXME: check it we really need any of this
+# COPY    --chown=builder:builder files/rpmmacros /home/builder/.rpmmacros
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["bash"]

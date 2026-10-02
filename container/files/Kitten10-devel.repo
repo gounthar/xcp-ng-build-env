@@ -1,0 +1,5 @@
+[kitten10-devel]
+name=AlmaLinux Kitten 10 devel
+baseurl=https://kitten.repo.almalinux.org/10-kitten/devel/@RPMARCH@/os/
+enabled=1
+gpgcheck=1

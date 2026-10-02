@@ -114,6 +114,9 @@ case "$1" in
             aarch64)
                 : ${PLATFORM:=linux/aarch64}
                 ;;
+            riscv64)
+                : ${PLATFORM:=linux/riscv64}
+                ;;
         esac
         ;;
     8.*)
@@ -137,6 +140,11 @@ case "$PLATFORM" in
         ;;
     linux/aarch64)
         RPMARCH=aarch64
+        ;;
+    linux/riscv64)
+        # No AlmaLinux 10.x for riscv64: build on Kitten
+        RPMARCH=riscv64
+        [ "$DOCKERFILE" = Dockerfile-9.x ] && DOCKERFILE=Dockerfile-9.x-kitten
         ;;
     *)
         echo >&2 "Unsupported platform '$PLATFORM'"
