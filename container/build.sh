@@ -27,6 +27,10 @@ Usage: $SELF_NAME [--platform PF] <version>
              add specified directory as a repo
 --bootstrap  generate a bootstrap image, needed to build xcp-ng-release.
 --isarpm     (internal) generate an image suitable for the ISARPM build system.
+--layer-repo DIR
+             (Kitten only) install every package from the local repo DIR, which
+             also holds packages.list, the names to install, instead of from
+             the live repos.
 EOF
 }
 
@@ -35,6 +39,7 @@ EXTRA_ARGS=()
 OVERLAY_CACHE=0
 VARIANT=build
 REPO=
+LAYER_REPO=
 while [ $# -ge 1 ]; do
     case "$1" in
         --help|-h)
@@ -58,6 +63,11 @@ while [ $# -ge 1 ]; do
         --add-repo)
             [ $# -ge 2 ] || die_usage "$1 needs an argument"
             REPO="$2"
+            shift
+            ;;
+        --layer-repo)
+            [ $# -ge 2 ] || die_usage "$1 needs an argument"
+            LAYER_REPO="$2"
             shift
             ;;
         -*)
@@ -173,6 +183,28 @@ case $VARIANT in
         ;;
 esac
 
+# handle --layer-repo: its .repo file, and that of --add-repo, go to a
+# directory the Dockerfile makes the only reposdir while installing
+REPOSD=
+if [ -n "$LAYER_REPO" ]; then
+    [ "$DOCKERFILE" = Dockerfile-9.x-kitten ] || die "--layer-repo is only supported on Kitten"
+    [ -r "$LAYER_REPO/packages.list" ] || die "$LAYER_REPO/packages.list missing"
+    REPOSD=$(mktemp -d)
+    cat > "$REPOSD/layer.repo" <<EOF
+[layer]
+name=Local repository - layer from $LAYER_REPO
+baseurl=file:///local-repos/layer/
+enabled=1
+repo_gpgcheck=0
+gpgcheck=0
+EOF
+    EXTRA_ARGS+=(
+        "-v" "$LAYER_REPO:/local-repos/layer:ro"
+        "-v" "$REPOSD:/etc/xcp-ng-build-env/repos.d:ro"
+        "--build-arg" "LAYER_REPO=1"
+    )
+fi
+
 # handle --add-repo
 if [ -n "$REPO" ]; then
     REPOCONF=$(mktemp)
@@ -187,10 +219,12 @@ repo_gpgcheck=0
 gpgcheck=0
 priority=1
 EOF
-    EXTRA_ARGS+=(
-        "-v" "$REPOCONF:/etc/yum.repos.d/$REPONICK.repo:rw"
-        "-v" "$REPODIR:/local-repos/$REPONICK:ro"
-    )
+    if [ -n "$REPOSD" ]; then
+        mv "$REPOCONF" "$REPOSD/$REPONICK.repo"
+    else
+        EXTRA_ARGS+=("-v" "$REPOCONF:/etc/yum.repos.d/$REPONICK.repo:rw")
+    fi
+    EXTRA_ARGS+=("-v" "$REPODIR:/local-repos/$REPONICK:ro")
 fi
 
 "$RUNNER" build \

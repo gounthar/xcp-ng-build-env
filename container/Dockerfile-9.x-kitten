@@ -1,9 +1,15 @@
 # riscv64 variant of Dockerfile-9.x: AlmaLinux 10.x has no riscv64, Kitten has.
 # No releasever pin (Kitten is a rolling 10), no EPEL (no riscv64 tree), and no
 # XCP-ng 8.99 repo (no riscv64 tree either; copied but disabled).
-FROM    ghcr.io/almalinux/10-kitten-minimal:10-kitten
+#
+# Kitten is rolling: the base tag and the repos move under a build.  The base
+# is pinned by its index digest.  With build.sh --layer-repo, every package
+# comes from that local repo instead of the live ones (LAYER_REPO set): the
+# packages listed in its packages.list, installed at the versions it holds.
+FROM    ghcr.io/almalinux/10-kitten-minimal:10-kitten@sha256:ecdd9ed126a5d8aa2a07b4aa1734f1cd002b01ea440b0c1576683432d6ff96e9
 
 ARG     VARIANT=build
+ARG     LAYER_REPO=
 
 
 # Add our repositories
@@ -23,8 +29,23 @@ RUN     curl -sSf https://xcp-ng.org/RPM-GPG-KEY-xcpng -o /etc/pki/rpm-gpg/RPM-G
 # dnf config-manager not available yet?
 RUN     sed -i -e 's/^enabled=1$/enabled=0/' /etc/yum.repos.d/xcp-ng.repo
 
+# --layer-repo: build.sh mounts the local repos' .repo files there, and both
+# microdnf and dnf then see no other repo until the lock is lifted below
+RUN     if [ -n "${LAYER_REPO}" ]; then \
+            echo "reposdir=/etc/xcp-ng-build-env/repos.d" >> /etc/dnf/dnf.conf; \
+        fi
+
 RUN     microdnf -y install dnf
-RUN     dnf --setopt=install_weak_deps=False swap -y coreutils-single @core
+# --layer-repo: no comps there for @core, so install the whole package list,
+# after bringing the base image's own packages to the repo's versions
+RUN     if [ -n "${LAYER_REPO}" ]; then \
+            dnf distro-sync -y \
+            && dnf --setopt=install_weak_deps=False swap -y coreutils-single coreutils \
+            && grep -v '^#' /local-repos/layer/packages.list \
+               | xargs dnf --setopt=install_weak_deps=False install -y; \
+        else \
+            dnf --setopt=install_weak_deps=False swap -y coreutils-single @core; \
+        fi
 RUN     dnf remove -y \
         crypto-policies-scripts \
         iwlwifi-dvm-firmware \
@@ -79,6 +100,15 @@ RUN     yum clean all
 RUN     if [ ${VARIANT} != bootstrap ]; then \
             dnf install -y \
             xcp-ng-release; \
+        fi
+
+# --layer-repo: fail if an installed package is not one the local repos hold
+# (a base package the list misses keeps its base version), then give the
+# image its own repos back
+COPY    files/check-layer-repo.sh /usr/local/bin/check-layer-repo.sh
+RUN     if [ -n "${LAYER_REPO}" ]; then \
+            /usr/local/bin/check-layer-repo.sh \
+            && sed -i -e '\|^reposdir=/etc/xcp-ng-build-env/repos.d$|d' /etc/dnf/dnf.conf; \
         fi
 
 # enable repositories commonly required to build
